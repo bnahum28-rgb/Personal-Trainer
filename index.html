@@ -36,6 +36,10 @@ button.pri{background:var(--acc);color:var(--accink);border-color:var(--acc);fon
 .exn{font-weight:600}
 .exm{font-size:13px;color:var(--mut)}
 .exm a{color:var(--acc);font-weight:600}
+.ex.col{display:block}
+.sets{display:grid;gap:8px;margin-top:8px}
+.sets input.in{width:100%;font-size:19px}
+.sets input.in::placeholder{color:var(--mut);opacity:.85}
 .gu{display:inline-block;margin-top:4px;font-size:12px;font-weight:700;padding:2px 8px;border-radius:999px;background:var(--ok);color:var(--okink)}
 input.in{width:96px;font-size:20px;text-align:center;padding:10px 6px;border:1px solid var(--line);border-radius:10px;background:var(--inbg);color:var(--inink);min-height:48px}
 input.in:focus{outline:2px solid var(--acc)}
@@ -143,12 +147,21 @@ const fmt = n => n == null ? "" : String(Math.round(n * 10) / 10);
 // ---------- DERIVED ----------
 const hasWorkout = d => { const l = state.lifts[d]; return !!l && Object.keys(l).length > 0; };
 function onTarget(d) { const x = state.daily[d]; if (!x || x.cal == null || x.pro == null) return null; return Math.abs(x.cal - T().cal) <= 100 && x.pro >= T().pro - 10; }
+const exInfo = (wid, id) => WORKOUTS[wid].ex.find(e => e[0] === id);
+const nSets = (wid, id) => parseInt(exInfo(wid, id)[2]) || 3;
+function eff(v, n) { const a = Array.isArray(v) ? v : (v == null ? [] : [v]); const out = []; for (let i = 0; i < n; i++) out.push(a[i] == null ? null : a[i]); return out; }
+const topOf = e => { const v = e.filter(x => x != null); return v.length ? Math.max(...v) : null; };
+const showEff = e => { const v = e.filter(x => x != null); return !v.length ? "" : (v.every(x => x === v[0]) ? fmt(v[0]) : v.map(fmt).join(" / ")); };
 function liftHistory(wid, id, beforeDate) {
-  const out = []; const k = wid + "|" + id;
-  Object.keys(state.lifts).sort().forEach(d => { if (d < beforeDate && state.lifts[d][k] != null) out.push(state.lifts[d][k]); });
+  const out = [], k = wid + "|" + id, n = nSets(wid, id);
+  Object.keys(state.lifts).sort().forEach(d => { if (d < beforeDate && state.lifts[d][k] != null) { const e = eff(state.lifts[d][k], n), t = topOf(e); if (t != null) out.push({e, top: t}); } });
   return out;
 }
-function goUp(hist) { if (!hist.length) return false; const last = hist[hist.length - 1]; return hist.filter(v => v === last).length >= 2; }
+function goUp(hist) { if (!hist.length) return false; const last = hist[hist.length - 1].top; return hist.filter(h => h.top === last).length >= 2; }
+function liftItem(d, wid, id) {
+  const n = nSets(wid, id), e = eff((state.lifts[d] || {})[wid + "|" + id], n), t = topOf(e), ex = exInfo(wid, id);
+  return {type: "lift", date: d, workout: WORKOUTS[wid].name, exercise: ex[1], weight: t == null ? "" : t, set1: e[0] == null ? "" : e[0], set2: n > 1 && e[1] != null ? e[1] : "", set3: n > 2 && e[2] != null ? e[2] : ""};
+}
 function weighIns() { return Object.keys(state.weights).sort().map(d => [d, state.weights[d]]); }
 function weekOf(d) { const i = Math.floor(diffDays(START, d) / 7); return i < 0 ? 0 : (i > 3 ? 3 : i); }
 function weekStats() {
@@ -198,7 +211,7 @@ function queueAll() {
   Object.keys(state.daily).forEach(d => queueDaily(d));
   Object.keys(state.weights).forEach(d => queue({type: "weight", date: d, weight: state.weights[d]}));
   Object.keys(state.run).forEach(d => queue({type: "run", date: d, miles: state.run[d]}));
-  Object.keys(state.lifts).forEach(d => Object.keys(state.lifts[d]).forEach(k => { const [wid, id] = k.split("|"); const ex = WORKOUTS[wid] && WORKOUTS[wid].ex.find(e => e[0] === id); if (ex) queue({type: "lift", date: d, workout: WORKOUTS[wid].name, exercise: ex[1], weight: state.lifts[d][k]}); }));
+  Object.keys(state.lifts).forEach(d => Object.keys(state.lifts[d]).forEach(k => { const [wid, id] = k.split("|"); if (WORKOUTS[wid] && exInfo(wid, id)) queue(liftItem(d, wid, id)); }));
 }
 function queueDaily(d) { const x = state.daily[d] || {}; queue({type: "daily", date: d, calories: x.cal == null ? "" : x.cal, protein: x.pro == null ? "" : x.pro, steps: x.steps == null ? "" : x.steps}); }
 window.addEventListener("online", flush);
@@ -223,8 +236,10 @@ function renderToday() {
   if (W) {
     h += `<div class="card"><h2>${W.name}</h2>`;
     W.ex.forEach(([id, name, tgt, q]) => {
-      const hist = liftHistory(wid, id, d), last = hist.length ? hist[hist.length - 1] : null, cur = (state.lifts[d] || {})[wid + "|" + id];
-      h += `<div class="ex" data-ex="${id}"><div><div class="exn">${name}</div><div class="exm">${tgt} &middot; <a href="${YT(q)}" target="_blank" rel="noopener">Watch</a>${last != null ? " &middot; Last: " + fmt(last) + " lb" : ""}</div><div class="gu-slot"></div></div><input class="in" inputmode="decimal" autocomplete="off" placeholder="lb" data-k="lift" data-w="${wid}" data-id="${id}" value="${cur != null ? fmt(cur) : ""}"></div>`;
+      const hist = liftHistory(wid, id, d), last = hist.length ? hist[hist.length - 1] : null, n = nSets(wid, id);
+      const raw = (state.lifts[d] || {})[wid + "|" + id], arr = Array.isArray(raw) ? raw : (raw == null ? [] : [raw]), e = eff(raw, n);
+      let ins = ""; for (let i = 0; i < n; i++) ins += `<input class="in" inputmode="decimal" autocomplete="off" placeholder="Set ${i + 1}" data-k="lift" data-w="${wid}" data-id="${id}" data-s="${i}" value="${arr[i] != null ? fmt(arr[i]) : ""}">`;
+      h += `<div class="ex col" data-ex="${id}"><div><div class="exn">${name}</div><div class="exm">${tgt} &middot; <a href="${YT(q)}" target="_blank" rel="noopener">Watch</a>${last ? " &middot; Last: " + showEff(last.e) + " lb" : ""}</div><div class="gu-slot"></div></div><div class="sets" style="grid-template-columns:repeat(${n},1fr)">${ins}</div></div>`;
     });
     if (W.run) h += `<div class="ex"><div><div class="exn">Easy run (miles)</div><div class="exm">3 to 4 miles, easy pace</div></div><input class="in" inputmode="decimal" autocomplete="off" placeholder="mi" data-k="run" value="${state.run[d] != null ? fmt(state.run[d]) : ""}"></div>`;
     h += `<div class="note" style="margin-top:8px">When it says Go up, add weight only if you hit 10 reps on every set.</div></div>`;
@@ -250,8 +265,8 @@ function renderToday() {
 function refreshChips() {
   if (tab !== "today") return; const d = viewDate, wd = pd(d).getDay(), wid = d > END ? null : SCHEDULE[wd];
   if (wid) document.querySelectorAll(".ex[data-ex]").forEach(row => {
-    const id = row.dataset.ex, hist = liftHistory(wid, id, d), cur = (state.lifts[d] || {})[wid + "|" + id], last = hist.length ? hist[hist.length - 1] : null;
-    const slot = row.querySelector(".gu-slot"); slot.innerHTML = (goUp(hist) && !(cur != null && cur > last)) ? `<span class="gu">Go up today</span>` : "";
+    const id = row.dataset.ex, hist = liftHistory(wid, id, d), n = nSets(wid, id), curTop = topOf(eff((state.lifts[d] || {})[wid + "|" + id], n)), lastTop = hist.length ? hist[hist.length - 1].top : null;
+    row.querySelector(".gu-slot").innerHTML = (goUp(hist) && !(curTop != null && curTop > lastTop)) ? `<span class="gu">Go up today</span>` : "";
   });
   const x = state.daily[d] || {}, set = (id, html) => { const e = document.getElementById(id); if (e) e.innerHTML = html; };
   set("c-cal", x.cal == null ? "" : (x.cal < T().floor ? chip("bad", "Low") : (x.cal > T().cal + 100 ? chip("warn", "High") : chip("ok", "On"))));
@@ -263,9 +278,10 @@ view.addEventListener("input", e => {
   const t = e.target; if (!t.dataset || !t.dataset.k) return;
   let v = t.value.replace(/[^0-9.]/g, ""); if (v !== t.value) t.value = v; const n = v === "" ? null : num(v); const d = viewDate;
   if (t.dataset.k === "lift") {
-    const wid = t.dataset.w, id = t.dataset.id, k = wid + "|" + id; state.lifts[d] = state.lifts[d] || {};
-    if (n == null) delete state.lifts[d][k]; else state.lifts[d][k] = n; if (!Object.keys(state.lifts[d]).length) delete state.lifts[d];
-    const ex = WORKOUTS[wid].ex.find(x => x[0] === id); queue({type: "lift", date: d, workout: WORKOUTS[wid].name, exercise: ex[1], weight: n == null ? "" : n});
+    const wid = t.dataset.w, id = t.dataset.id, k = wid + "|" + id, si = +t.dataset.s, ns = nSets(wid, id); state.lifts[d] = state.lifts[d] || {};
+    const old = state.lifts[d][k], arr = Array.isArray(old) ? old.slice() : (old == null ? [] : [old]); while (arr.length < ns) arr.push(null);
+    arr[si] = n; if (arr.every(x => x == null)) delete state.lifts[d][k]; else state.lifts[d][k] = arr; if (!Object.keys(state.lifts[d]).length) delete state.lifts[d];
+    queue(liftItem(d, wid, id));
   } else if (t.dataset.k === "run") {
     if (n == null) delete state.run[d]; else state.run[d] = n; queue({type: "run", date: d, miles: n == null ? "" : n});
   } else if (t.dataset.k === "daily") {
